@@ -11,6 +11,8 @@ readonly PROBE_TIMEOUT_MS="${PROBE_TIMEOUT_MS:-15000}"
 readonly MAX_CONSECUTIVE_FAILURES="${MAX_CONSECUTIVE_FAILURES:-3}"
 readonly SERVICE_NAME="${OPENCLAW_SERVICE_NAME:-openclaw-gateway.service}"
 readonly SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
+readonly CURL_BIN="${CURL_BIN:-curl}"
+readonly GATEWAY_HTTP_URL="${GATEWAY_HTTP_URL:-http://127.0.0.1:18789}"
 
 log() { printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"; }
 
@@ -62,6 +64,7 @@ sleep "$STARTUP_GRACE_SECONDS"
 readonly INITIAL_RESTARTS="$("$SYSTEMCTL_BIN" --user show "$SERVICE_NAME" -p NRestarts --value)"
 
 failures=0
+channel_successes=0
 deadline=$((SECONDS + WINDOW_SECONDS))
 while (( SECONDS < deadline )); do
   current_restarts="$("$SYSTEMCTL_BIN" --user show "$SERVICE_NAME" -p NRestarts --value || echo 999999)"
@@ -69,33 +72,55 @@ while (( SECONDS < deadline )); do
     rollback "gateway restart count changed from $INITIAL_RESTARTS to $current_restarts"
   fi
 
-  probe=""
-  if probe="$($OPENCLAW_BIN gateway probe --json --timeout "$PROBE_TIMEOUT_MS" 2>/dev/null)" &&
-     jq -e '
-       .ok == true and .degraded == false and
-       (.targets[] | select(.active == true) | .health) as $h |
-       $h.ok == true and $h.eventLoop.degraded == false and
-       $h.channels.slack.connected == true and
-       $h.channels.slack.healthState == "healthy" and
-       $h.channels["silverpine-chat"].connected == true and
-       $h.channels["silverpine-chat"].healthState == "healthy" and
-       (($h.channels["silverpine-chat"].reconnectAttempts // 0) <= 2) and
-       ($h.channels["silverpine-chat"].lastError == null)
-     ' >/dev/null <<<"$probe"; then
-    failures=0
-  else
+  # These are direct HTTP requests to the already-running gateway. They avoid
+  # conflating a slow/failing OpenClaw CLI cold start with gateway death.
+  live="$($CURL_BIN --silent --show-error --max-time 3 "$GATEWAY_HTTP_URL/health" 2>&1 || true)"
+  ready="$($CURL_BIN --silent --show-error --max-time 3 "$GATEWAY_HTTP_URL/ready" 2>&1 || true)"
+  if ! jq -e '.ok == true' >/dev/null 2>&1 <<<"$live" ||
+     ! jq -e '.ready == true and .eventLoop.degraded == false' >/dev/null 2>&1 <<<"$ready"; then
     failures=$((failures + 1))
-    log "health check failed ($failures/$MAX_CONSECUTIVE_FAILURES)"
-    if [[ -n "${probe:-}" ]]; then
-      jq -c '{ok, degraded, channels: (.targets[0].health.channels // null)}' <<<"$probe" 2>/dev/null |
-        sed 's/^/health snapshot: /' || true
-    else
-      log "health snapshot: gateway probe returned no JSON"
-    fi
-    if (( failures >= MAX_CONSECUTIVE_FAILURES )); then rollback "gateway or channel health remained bad"; fi
+    log "direct gateway health failed ($failures/$MAX_CONSECUTIVE_FAILURES): live=$(jq -c . 2>/dev/null <<<"$live" || printf '%q' "$live") ready=$(jq -c . 2>/dev/null <<<"$ready" || printf '%q' "$ready")"
+    if (( failures >= MAX_CONSECUTIVE_FAILURES )); then rollback "direct gateway health remained bad"; fi
+    sleep "$INTERVAL_SECONDS"
+    continue
+  fi
+
+  failures=0
+
+  # Authenticated RPC verifies channel state. A CLI-local failure is recorded
+  # verbatim but is not evidence that the gateway is dead when direct health
+  # remains good. The observation cannot pass without at least one good RPC.
+  probe_stdout="$(mktemp)"
+  probe_stderr="$(mktemp)"
+  probe_started="$SECONDS"
+  set +e
+  "$OPENCLAW_BIN" gateway call health --json --timeout "$PROBE_TIMEOUT_MS" >"$probe_stdout" 2>"$probe_stderr"
+  probe_rc=$?
+  set -e
+  probe_elapsed=$((SECONDS - probe_started))
+  probe="$(cat "$probe_stdout")"
+  probe_error="$(cat "$probe_stderr")"
+  rm -f "$probe_stdout" "$probe_stderr"
+
+  if (( probe_rc == 0 )) && jq -e '
+       .ok == true and .eventLoop.degraded == false and
+       .channels.slack.connected == true and
+       .channels.slack.healthState == "healthy" and
+       .channels["silverpine-chat"].connected == true and
+       .channels["silverpine-chat"].healthState == "healthy" and
+       ((.channels["silverpine-chat"].reconnectAttempts // 0) <= 2) and
+       (.channels["silverpine-chat"].lastError == null)
+     ' >/dev/null <<<"$probe"; then
+    channel_successes=$((channel_successes + 1))
+  else
+    log "channel RPC inconclusive: exit=$probe_rc elapsed=${probe_elapsed}s stdout_bytes=${#probe} stderr_bytes=${#probe_error}"
+    [[ -z "$probe_error" ]] || while IFS= read -r line; do log "channel RPC stderr: $line"; done <<<"$probe_error"
+    [[ -z "$probe" ]] || jq -c '{ok, eventLoop, channels}' <<<"$probe" 2>/dev/null |
+      sed 's/^/channel RPC snapshot: /' || true
   fi
   sleep "$INTERVAL_SECONDS"
 done
 
+if (( channel_successes == 0 )); then rollback "no authenticated channel health check succeeded"; fi
 armed=0
-log "health observation passed; Silverpine Chat remains enabled"
+log "health observation passed with $channel_successes authenticated channel checks; Silverpine Chat remains enabled"
