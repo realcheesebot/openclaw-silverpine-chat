@@ -49,24 +49,36 @@ export function openSocket(url, signal, onEvent, WebSocketImpl = WebSocket) {
   });
 }
 
-export async function startGateway(ctx) {
+export async function startGateway(ctx, dependencies = {}) {
   const { account } = ctx;
   if (!account.configured) throw new Error(`Silverpine Chat account ${account.accountId} is not configured`);
   const channelRuntime = ctx.channelRuntime;
   if (!channelRuntime) throw new Error("OpenClaw channel runtime is unavailable");
-  let cursor = await bootstrapCursor(account);
+  const bootstrap = dependencies.bootstrapCursor || bootstrapCursor;
+  const getRealtimeTicket = dependencies.realtimeTicket || realtimeTicket;
+  const connectSocket = dependencies.openSocket || openSocket;
+  const wait = dependencies.delay || delay;
+  let cursor;
+  let bootstrapped = false;
   let attempts = 0;
   ctx.setStatus({ accountId: account.accountId, running: true, configured: true, connected: false });
   while (!ctx.abortSignal.aborted) {
     try {
-      const { ticket } = await realtimeTicket(account);
+      // Bootstrap is network-backed and must live inside the reconnect loop.
+      // Otherwise a server outage during account startup terminates the channel
+      // worker permanently instead of letting it recover when Chat returns.
+      if (!bootstrapped) {
+        cursor = await bootstrap(account);
+        bootstrapped = true;
+      }
+      const { ticket } = await getRealtimeTicket(account);
       const wsUrl = new URL("/v1/realtime", account.serverUrl);
       wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
       wsUrl.searchParams.set("ticket", ticket);
       if (cursor) wsUrl.searchParams.set("after", cursor);
       ctx.setStatus({ accountId: account.accountId, running: true, connected: true, lastConnectedAt: Date.now() });
       attempts = 0;
-      await openSocket(wsUrl, ctx.abortSignal, async (event) => {
+      await connectSocket(wsUrl, ctx.abortSignal, async (event) => {
         await dispatchMessage({ event, account, cfg: ctx.cfg, channelRuntime });
         if (event.cursor) { cursor = event.cursor; writeCursor(account.accountId, cursor); }
       });
@@ -74,7 +86,7 @@ export async function startGateway(ctx) {
       if (ctx.abortSignal.aborted || error?.name === "AbortError") break;
       attempts += 1;
       ctx.setStatus({ accountId: account.accountId, connected: false, reconnectAttempts: attempts, lastError: String(error?.message || error) });
-      await delay(Math.min(30_000, 1_000 * 2 ** Math.min(attempts - 1, 5)), ctx.abortSignal).catch(() => {});
+      await wait(Math.min(30_000, 1_000 * 2 ** Math.min(attempts - 1, 5)), ctx.abortSignal).catch(() => {});
     }
   }
   ctx.setStatus({ accountId: account.accountId, running: false, connected: false });
