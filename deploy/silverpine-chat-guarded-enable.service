@@ -1,0 +1,11 @@
+[Unit]
+Description=Guarded activation of the Silverpine Chat OpenClaw plugin
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.openclaw/workspace/projects/openclaw-silverpine-chat/deploy/guarded-enable.sh
+TimeoutStartSec=300
+
+# Deliberately not enabled at boot. Start explicitly with:
+# systemctl --user start --no-block silverpine-chat-guarded-enable.service
