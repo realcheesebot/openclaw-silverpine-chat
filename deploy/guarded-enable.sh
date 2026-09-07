@@ -2,7 +2,24 @@
 set -euo pipefail
 
 readonly CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$HOME/.openclaw/openclaw.json}"
-readonly OPENCLAW_BIN="${OPENCLAW_BIN:-$(command -v openclaw)}"
+resolve_openclaw_bin() {
+  if [[ -n "${OPENCLAW_BIN:-}" && -x "${OPENCLAW_BIN}" ]]; then
+    printf '%s\n' "$OPENCLAW_BIN"
+    return
+  fi
+  if command -v openclaw >/dev/null 2>&1; then
+    command -v openclaw
+    return
+  fi
+  if [[ -x "$HOME/.npm-global/bin/openclaw" ]]; then
+    printf '%s\n' "$HOME/.npm-global/bin/openclaw"
+    return
+  fi
+  printf '%s\n' "cannot locate an executable OpenClaw CLI" >&2
+  exit 1
+}
+
+readonly OPENCLAW_BIN="$(resolve_openclaw_bin)"
 readonly ROLLBACK_SCRIPT="${ROLLBACK_SCRIPT:-$(dirname "$0")/rollback-chat-plugin.py}"
 readonly WINDOW_SECONDS="${WINDOW_SECONDS:-180}"
 readonly INTERVAL_SECONDS="${INTERVAL_SECONDS:-5}"
