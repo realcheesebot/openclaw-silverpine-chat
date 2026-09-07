@@ -24,20 +24,28 @@ async function bootstrapCursor(account) {
   return cursor;
 }
 
-function openSocket(url, signal, onEvent) {
+export function openSocket(url, signal, onEvent, WebSocketImpl = WebSocket) {
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
+    const socket = new WebSocketImpl(url);
     let chain = Promise.resolve();
+    let settled = false;
     const abort = () => socket.close(1000, "OpenClaw stopping");
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", abort);
+      if (error) reject(error); else resolve();
+    };
     signal.addEventListener("abort", abort, { once: true });
     socket.addEventListener("message", ({ data }) => {
-      chain = chain.then(() => onEvent(JSON.parse(String(data)))).catch((error) => {
-        socket.close(INBOUND_DISPATCH_CLOSE_CODE, "Inbound dispatch failed");
-        reject(error);
+      chain = chain.then(() => onEvent(JSON.parse(String(data))));
+      chain.catch((error) => {
+        try { socket.close(INBOUND_DISPATCH_CLOSE_CODE, "Inbound dispatch failed"); } catch {}
+        finish(error);
       });
     });
-    socket.addEventListener("close", () => chain.then(resolve, reject), { once: true });
-    socket.addEventListener("error", () => reject(new Error("Silverpine Chat WebSocket failed")), { once: true });
+    socket.addEventListener("close", () => chain.then(() => finish(), finish), { once: true });
+    socket.addEventListener("error", () => finish(new Error("Silverpine Chat WebSocket failed")), { once: true });
   });
 }
 
