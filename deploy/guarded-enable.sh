@@ -124,7 +124,7 @@ while (( SECONDS < deadline )); do
        .channels.slack.connected == true and
        .channels.slack.healthState == "healthy" and
        .channels["silverpine-chat"].connected == true and
-       .channels["silverpine-chat"].healthState == "healthy" and
+       .channels["silverpine-chat"].running == true and
        ((.channels["silverpine-chat"].reconnectAttempts // 0) <= 2) and
        (.channels["silverpine-chat"].lastError == null)
      ' >/dev/null <<<"$probe"; then
