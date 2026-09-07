@@ -7,6 +7,11 @@ const delay = (ms, signal) => new Promise((resolve, reject) => {
   signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
 });
 
+// Node's WHATWG WebSocket implementation only permits 1000 or application
+// close codes in the 3000-4999 range. 1011 is valid on the wire, but calling
+// WebSocket.close(1011) throws synchronously in undici and can crash OpenClaw.
+export const INBOUND_DISPATCH_CLOSE_CODE = 4000;
+
 async function bootstrapCursor(account) {
   let cursor = readCursor(account.accountId);
   if (cursor) return cursor;
@@ -27,7 +32,7 @@ function openSocket(url, signal, onEvent) {
     signal.addEventListener("abort", abort, { once: true });
     socket.addEventListener("message", ({ data }) => {
       chain = chain.then(() => onEvent(JSON.parse(String(data)))).catch((error) => {
-        socket.close(1011, "Inbound dispatch failed");
+        socket.close(INBOUND_DISPATCH_CLOSE_CODE, "Inbound dispatch failed");
         reject(error);
       });
     });

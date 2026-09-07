@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { dispatchMessage, isDispatchableMessage } from "../src/inbound.js";
 import { parseTarget } from "../src/api.js";
+import { INBOUND_DISPATCH_CLOSE_CODE } from "../src/gateway.js";
+
+test("WebSocket dispatch failures use an application close code accepted by Node", () => {
+  assert.ok(INBOUND_DISPATCH_CLOSE_CODE >= 3000 && INBOUND_DISPATCH_CLOSE_CODE <= 4999);
+});
 
 test("target parser supports explicit and bare channel IDs", () => {
   assert.deepEqual(parseTarget("channel:chn_1"), { kind: "channel", id: "chn_1" });
