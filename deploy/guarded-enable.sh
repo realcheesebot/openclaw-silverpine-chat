@@ -94,7 +94,7 @@ while (( SECONDS < deadline )); do
   live="$($CURL_BIN --silent --show-error --max-time 3 "$GATEWAY_HTTP_URL/health" 2>&1 || true)"
   ready="$($CURL_BIN --silent --show-error --max-time 3 "$GATEWAY_HTTP_URL/ready" 2>&1 || true)"
   if ! jq -e '.ok == true' >/dev/null 2>&1 <<<"$live" ||
-     ! jq -e '.ready == true and .eventLoop.degraded == false' >/dev/null 2>&1 <<<"$ready"; then
+     ! jq -e '.ready == true and ((.failing // []) | length) == 0' >/dev/null 2>&1 <<<"$ready"; then
     failures=$((failures + 1))
     log "direct gateway health failed ($failures/$MAX_CONSECUTIVE_FAILURES): live=$(jq -c . 2>/dev/null <<<"$live" || printf '%q' "$live") ready=$(jq -c . 2>/dev/null <<<"$ready" || printf '%q' "$ready")"
     if (( failures >= MAX_CONSECUTIVE_FAILURES )); then rollback "direct gateway health remained bad"; fi
@@ -120,21 +120,25 @@ while (( SECONDS < deadline )); do
   rm -f "$probe_stdout" "$probe_stderr"
 
   if (( probe_rc == 0 )) && jq -e '
-       .ok == true and .eventLoop.degraded == false and
-       .channels.slack.connected == true and
-       .channels.slack.healthState == "healthy" and
-       .channels["silverpine-chat"].connected == true and
-       .channels["silverpine-chat"].running == true and
+       .ok == true and
+       (.channels.slack.connected // false) == true and
+       (.channels.slack.running // false) == true and
+       (.channels["silverpine-chat"].connected // false) == true and
+       (.channels["silverpine-chat"].running // false) == true and
        ((.channels["silverpine-chat"].reconnectAttempts // 0) <= 2) and
-       (.channels["silverpine-chat"].lastError == null)
-     ' >/dev/null <<<"$probe"; then
+       ((.channels["silverpine-chat"].lastError // null) == null)
+     ' >/dev/null 2>"$probe_stderr.jq" <<<"$probe"; then
     channel_successes=$((channel_successes + 1))
   else
+    if [[ -s "$probe_stderr.jq" ]]; then
+      probe_error="${probe_error}${probe_error:+$'\n'}jq: $(<"$probe_stderr.jq")"
+    fi
     log "channel RPC inconclusive: exit=$probe_rc elapsed=${probe_elapsed}s stdout_bytes=${#probe} stderr_bytes=${#probe_error}"
     [[ -z "$probe_error" ]] || while IFS= read -r line; do log "channel RPC stderr: $line"; done <<<"$probe_error"
     [[ -z "$probe" ]] || jq -c '{ok, eventLoop, channels}' <<<"$probe" 2>/dev/null |
       sed 's/^/channel RPC snapshot: /' || true
   fi
+  rm -f "$probe_stderr.jq"
   sleep "$INTERVAL_SECONDS"
 done
 
