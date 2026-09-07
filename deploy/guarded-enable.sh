@@ -6,7 +6,8 @@ readonly OPENCLAW_BIN="${OPENCLAW_BIN:-$(command -v openclaw)}"
 readonly ROLLBACK_SCRIPT="${ROLLBACK_SCRIPT:-$(dirname "$0")/rollback-chat-plugin.py}"
 readonly WINDOW_SECONDS="${WINDOW_SECONDS:-180}"
 readonly INTERVAL_SECONDS="${INTERVAL_SECONDS:-5}"
-readonly STARTUP_GRACE_SECONDS="${STARTUP_GRACE_SECONDS:-20}"
+readonly STARTUP_GRACE_SECONDS="${STARTUP_GRACE_SECONDS:-30}"
+readonly PROBE_TIMEOUT_MS="${PROBE_TIMEOUT_MS:-15000}"
 readonly MAX_CONSECUTIVE_FAILURES="${MAX_CONSECUTIVE_FAILURES:-3}"
 readonly SERVICE_NAME="${OPENCLAW_SERVICE_NAME:-openclaw-gateway.service}"
 readonly SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
@@ -68,10 +69,11 @@ while (( SECONDS < deadline )); do
     rollback "gateway restart count changed from $INITIAL_RESTARTS to $current_restarts"
   fi
 
-  if probe="$($OPENCLAW_BIN gateway probe --json --timeout 3000 2>/dev/null)" &&
+  probe=""
+  if probe="$($OPENCLAW_BIN gateway probe --json --timeout "$PROBE_TIMEOUT_MS" 2>/dev/null)" &&
      jq -e '
        .ok == true and .degraded == false and
-       (.targets[] | select(.id == .id and .active == true) | .health) as $h |
+       (.targets[] | select(.active == true) | .health) as $h |
        $h.ok == true and $h.eventLoop.degraded == false and
        $h.channels.slack.connected == true and
        $h.channels.slack.healthState == "healthy" and
