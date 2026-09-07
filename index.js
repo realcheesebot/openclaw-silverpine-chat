@@ -7,12 +7,7 @@ export default defineChannelPluginEntry({
   name: "Silverpine Chat",
   description: "Silverpine Chat channel plugin",
   plugin: silverpineChatPlugin,
-  registerCliMetadata: {
-    descriptors: [
-      { name: "silverpine-chat", description: "Manage Silverpine Chat pairing", hasSubcommands: true }
-    ]
-  },
-  registerFull(api) {
+  registerCliMetadata(api) {
     api.registerCli((ctx) => registerPairingCli(ctx, api.runtime), {
       commands: ["silverpine-chat"],
       descriptors: [
