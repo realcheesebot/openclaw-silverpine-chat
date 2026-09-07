@@ -84,6 +84,12 @@ while (( SECONDS < deadline )); do
   else
     failures=$((failures + 1))
     log "health check failed ($failures/$MAX_CONSECUTIVE_FAILURES)"
+    if [[ -n "${probe:-}" ]]; then
+      jq -c '{ok, degraded, channels: (.targets[0].health.channels // null)}' <<<"$probe" 2>/dev/null |
+        sed 's/^/health snapshot: /' || true
+    else
+      log "health snapshot: gateway probe returned no JSON"
+    fi
     if (( failures >= MAX_CONSECUTIVE_FAILURES )); then rollback "gateway or channel health remained bad"; fi
   fi
   sleep "$INTERVAL_SECONDS"
