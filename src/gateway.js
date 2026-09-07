@@ -1,0 +1,68 @@
+import { events, realtimeTicket } from "./api.js";
+import { readCursor, writeCursor } from "./config.js";
+import { dispatchMessage } from "./inbound.js";
+
+const delay = (ms, signal) => new Promise((resolve, reject) => {
+  const timer = setTimeout(resolve, ms);
+  signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
+});
+
+async function bootstrapCursor(account) {
+  let cursor = readCursor(account.accountId);
+  if (cursor) return cursor;
+  for (;;) {
+    const page = await events(account, cursor, 500);
+    if (!page.items?.length || !page.nextCursor || page.nextCursor === cursor) break;
+    cursor = page.nextCursor;
+  }
+  if (cursor) writeCursor(account.accountId, cursor);
+  return cursor;
+}
+
+function openSocket(url, signal, onEvent) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    let chain = Promise.resolve();
+    const abort = () => socket.close(1000, "OpenClaw stopping");
+    signal.addEventListener("abort", abort, { once: true });
+    socket.addEventListener("message", ({ data }) => {
+      chain = chain.then(() => onEvent(JSON.parse(String(data)))).catch((error) => {
+        socket.close(1011, "Inbound dispatch failed");
+        reject(error);
+      });
+    });
+    socket.addEventListener("close", () => chain.then(resolve, reject), { once: true });
+    socket.addEventListener("error", () => reject(new Error("Silverpine Chat WebSocket failed")), { once: true });
+  });
+}
+
+export async function startGateway(ctx) {
+  const { account } = ctx;
+  if (!account.configured) throw new Error(`Silverpine Chat account ${account.accountId} is not configured`);
+  const channelRuntime = ctx.channelRuntime;
+  if (!channelRuntime) throw new Error("OpenClaw channel runtime is unavailable");
+  let cursor = await bootstrapCursor(account);
+  let attempts = 0;
+  ctx.setStatus({ accountId: account.accountId, running: true, configured: true, connected: false });
+  while (!ctx.abortSignal.aborted) {
+    try {
+      const { ticket } = await realtimeTicket(account);
+      const wsUrl = new URL("/v1/realtime", account.serverUrl);
+      wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
+      wsUrl.searchParams.set("ticket", ticket);
+      if (cursor) wsUrl.searchParams.set("after", cursor);
+      ctx.setStatus({ accountId: account.accountId, running: true, connected: true, lastConnectedAt: Date.now() });
+      attempts = 0;
+      await openSocket(wsUrl, ctx.abortSignal, async (event) => {
+        await dispatchMessage({ event, account, cfg: ctx.cfg, channelRuntime });
+        if (event.cursor) { cursor = event.cursor; writeCursor(account.accountId, cursor); }
+      });
+    } catch (error) {
+      if (ctx.abortSignal.aborted || error?.name === "AbortError") break;
+      attempts += 1;
+      ctx.setStatus({ accountId: account.accountId, connected: false, reconnectAttempts: attempts, lastError: String(error?.message || error) });
+      await delay(Math.min(30_000, 1_000 * 2 ** Math.min(attempts - 1, 5)), ctx.abortSignal).catch(() => {});
+    }
+  }
+  ctx.setStatus({ accountId: account.accountId, running: false, connected: false });
+}

@@ -1,0 +1,33 @@
+{
+  "id": "silverpine-chat",
+  "channels": ["silverpine-chat"],
+  "activation": { "onStartup": false },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "channelConfigs": {
+    "silverpine-chat": {
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "serverUrl": { "type": "string", "format": "uri" },
+          "credentialFile": { "type": "string" },
+          "defaultTo": { "type": "string" },
+          "respondToBots": { "type": "boolean" }
+        },
+        "required": ["serverUrl", "credentialFile"]
+      },
+      "uiHints": {
+        "serverUrl": { "label": "Chat server URL" },
+        "credentialFile": { "label": "Bot credential file", "sensitive": true },
+        "defaultTo": { "label": "Default channel target" },
+        "respondToBots": { "label": "Respond to bot-authored messages" }
+      }
+    }
+  }
+}
