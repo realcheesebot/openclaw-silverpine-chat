@@ -50,10 +50,15 @@ finally:
 PY
 armed=1
 
-readonly INITIAL_RESTARTS="$("$SYSTEMCTL_BIN" --user show "$SERVICE_NAME" -p NRestarts --value)"
 "$SYSTEMCTL_BIN" --user restart "$SERVICE_NAME"
 log "Silverpine Chat enabled under a ${WINDOW_SECONDS}s health guard"
 sleep "$STARTUP_GRACE_SECONDS"
+
+# NRestarts belongs to the current service activation and can reset when the
+# deliberate activation restart creates a new unit invocation. Establish the
+# crash baseline only after that restart has completed; from here onward an
+# increase means systemd had to restart the guarded gateway unexpectedly.
+readonly INITIAL_RESTARTS="$("$SYSTEMCTL_BIN" --user show "$SERVICE_NAME" -p NRestarts --value)"
 
 failures=0
 deadline=$((SECONDS + WINDOW_SECONDS))
