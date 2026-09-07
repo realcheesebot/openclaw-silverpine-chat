@@ -85,7 +85,9 @@ export async function startGateway(ctx, dependencies = {}) {
     } catch (error) {
       if (ctx.abortSignal.aborted || error?.name === "AbortError") break;
       attempts += 1;
-      ctx.setStatus({ accountId: account.accountId, connected: false, reconnectAttempts: attempts, lastError: String(error?.message || error) });
+      const errorMessage = String(error?.stack || error?.message || error);
+      ctx.log?.error(`[${account.accountId}] listener failed: ${errorMessage}`);
+      ctx.setStatus({ accountId: account.accountId, connected: false, reconnectAttempts: attempts, lastError: errorMessage });
       await wait(Math.min(30_000, 1_000 * 2 ** Math.min(attempts - 1, 5)), ctx.abortSignal).catch(() => {});
     }
   }
