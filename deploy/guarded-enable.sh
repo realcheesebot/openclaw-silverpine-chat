@@ -13,10 +13,23 @@ readonly SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 
 log() { printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"; }
 
+armed=0
+on_exit() {
+  status=$?
+  if (( status != 0 && armed == 1 )); then
+    armed=0
+    set +e
+    log "guard exited unexpectedly; forcing Silverpine Chat rollback"
+    OPENCLAW_CONFIG_PATH="$CONFIG_PATH" python3 "$ROLLBACK_SCRIPT"
+    "$SYSTEMCTL_BIN" --user restart "$SERVICE_NAME"
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
+trap 'exit 1' INT TERM
+
 rollback() {
   log "health guard failed: $1; disabling Silverpine Chat"
-  OPENCLAW_CONFIG_PATH="$CONFIG_PATH" python3 "$ROLLBACK_SCRIPT"
-  "$SYSTEMCTL_BIN" --user restart "$SERVICE_NAME"
   exit 1
 }
 
@@ -35,6 +48,7 @@ try:
 finally:
     if os.path.exists(temporary): os.unlink(temporary)
 PY
+armed=1
 
 readonly INITIAL_RESTARTS="$("$SYSTEMCTL_BIN" --user show "$SERVICE_NAME" -p NRestarts --value)"
 "$SYSTEMCTL_BIN" --user restart "$SERVICE_NAME"
@@ -70,4 +84,5 @@ while (( SECONDS < deadline )); do
   sleep "$INTERVAL_SECONDS"
 done
 
+armed=0
 log "health observation passed; Silverpine Chat remains enabled"
