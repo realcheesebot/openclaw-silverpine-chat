@@ -50,3 +50,25 @@ test("account startup retries when cursor bootstrap initially fails", async () =
   assert.ok(statuses.some((status) => status.lastError?.includes("temporarily unavailable")));
   assert.ok(statuses.some((status) => status.connected === true));
 });
+
+test("repeated socket or dispatch failures increase reconnect backoff", async () => {
+  const controller = new AbortController();
+  const waits = [];
+  let socketCalls = 0;
+  const ctx = {
+    account: { accountId: "default", configured: true, serverUrl: "https://chat.example" },
+    channelRuntime: {}, abortSignal: controller.signal, cfg: {}, setStatus: () => {},
+    log: { error: () => {} }
+  };
+  await startGateway(ctx, {
+    bootstrapCursor: async () => "42",
+    realtimeTicket: async () => ({ ticket: "ticket" }),
+    openSocket: async () => {
+      socketCalls += 1;
+      if (socketCalls < 4) throw new Error("dispatch failed");
+      controller.abort();
+    },
+    delay: async (ms) => { waits.push(ms); }
+  });
+  assert.deepEqual(waits, [1000, 2000, 4000]);
+});

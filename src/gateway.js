@@ -77,11 +77,12 @@ export async function startGateway(ctx, dependencies = {}) {
       wsUrl.searchParams.set("ticket", ticket);
       if (cursor) wsUrl.searchParams.set("after", cursor);
       ctx.setStatus({ accountId: account.accountId, running: true, connected: true, lastConnectedAt: Date.now() });
-      attempts = 0;
       await connectSocket(wsUrl, ctx.abortSignal, async (event) => {
         await dispatchMessage({ event, account, cfg: ctx.cfg, channelRuntime });
+        attempts = 0;
         if (event.cursor) { cursor = event.cursor; writeCursor(account.accountId, cursor); }
       });
+      if (!ctx.abortSignal.aborted) throw new Error("Silverpine Chat WebSocket closed");
     } catch (error) {
       if (ctx.abortSignal.aborted || error?.name === "AbortError") break;
       attempts += 1;

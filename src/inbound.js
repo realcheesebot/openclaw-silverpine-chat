@@ -12,6 +12,10 @@ export function isDispatchableMessage(event, account) {
 
 export async function dispatchMessage({ event, account, cfg, channelRuntime }) {
   if (!isDispatchableMessage(event, account)) return false;
+  const dispatchReply = channelRuntime?.reply?.dispatchReplyWithBufferedBlockDispatcher;
+  if (typeof dispatchReply !== "function") {
+    throw new Error("OpenClaw channel reply dispatcher is unavailable");
+  }
   const data = event.data;
   const kind = data.containerType === "conversation" ? "conversation" : "channel";
   const target = `${kind}:${data.containerId}`;
@@ -55,21 +59,20 @@ export async function dispatchMessage({ event, account, cfg, channelRuntime }) {
     access: { commands: { authorized: true }, mentions: { canDetectMention: false, wasMentioned: false } },
     extra: { GroupSubject: data.containerId, GroupChannel: data.containerId }
   });
-  await channelRuntime.inbound.dispatch({
+  await dispatchReply({
+    ctx: ctxPayload,
     cfg,
-    channel: CHANNEL_ID,
-    accountId: account.accountId,
-    route: { agentId: route.agentId, dmScope: route.dmScope, sessionKey: route.sessionKey },
-    ctxPayload,
-    delivery: {
+    dispatcherOptions: {
       deliver: async (payload) => {
-        const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+        const text = typeof payload?.text === "string"
+          ? payload.text.trim()
+          : typeof payload?.body === "string"
+            ? payload.body.trim()
+            : "";
         if (text) await sendText(account, target, text);
       }
     },
-    replyOptions: {},
-    replyPipeline: {},
-    record: { onRecordError: (error) => { throw error; } }
+    replyOptions: {}
   });
   return true;
 }

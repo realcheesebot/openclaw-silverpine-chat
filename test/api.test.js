@@ -39,12 +39,13 @@ test("human channel event dispatches to OpenClaw and delivers its reply", async 
   const channelRuntime = {
     routing: { resolveAgentRoute: () => ({ agentId: "main", accountId: "default", sessionKey: "agent:main:test", mainSessionKey: "agent:main:main", lastRoutePolicy: "session", dmScope: "per-peer" }) },
     session: { resolveStorePath: () => "/tmp/test-sessions.json", readSessionUpdatedAt: () => undefined },
-    reply: { resolveEnvelopeFormatOptions: () => ({}), formatAgentEnvelope: ({ body }) => body },
-    inbound: {
-      dispatch: async (params) => {
+    reply: {
+      resolveEnvelopeFormatOptions: () => ({}),
+      formatAgentEnvelope: ({ body }) => body,
+      dispatchReplyWithBufferedBlockDispatcher: async (params) => {
         dispatched = true;
-        assert.equal(params.ctxPayload.BodyForAgent, "ping");
-        await params.delivery.deliver({ text: "pong" });
+        assert.equal(params.ctx.BodyForAgent, "ping");
+        await params.dispatcherOptions.deliver({ text: "pong" });
       }
     }
   };
@@ -72,4 +73,23 @@ test("human channel event dispatches to OpenClaw and delivers its reply", async 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("inbound fails clearly when the supported reply dispatcher is absent", async () => {
+  const account = { accountId: "default", respondToBots: false, credential: { botUserId: "bot-user" } };
+  const event = {
+    type: "message.created",
+    data: {
+      id: "message-2", text: "ping", containerType: "channel", containerId: "channel-1",
+      sender: { id: "human-1", isBot: false }
+    }
+  };
+  const channelRuntime = {
+    routing: { resolveAgentRoute: () => ({ agentId: "main", accountId: "default", sessionKey: "agent:main:test" }) },
+    reply: { resolveEnvelopeFormatOptions: () => ({}), formatAgentEnvelope: ({ body }) => body }
+  };
+  await assert.rejects(
+    dispatchMessage({ event, account, cfg: {}, channelRuntime }),
+    /reply dispatcher is unavailable/
+  );
 });

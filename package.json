@@ -4,7 +4,12 @@
   "description": "Silverpine Chat channel plugin for OpenClaw",
   "type": "module",
   "main": "./index.js",
-  "files": ["index.js", "src", "openclaw.plugin.json", "README.md"],
+  "files": [
+    "index.js",
+    "src",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
   "scripts": {
     "test": "node --test",
     "check": "node --check index.js && node --check src/*.js"
@@ -13,7 +18,9 @@
     "openclaw": ">=2026.7.1"
   },
   "openclaw": {
-    "extensions": ["./index.js"],
+    "extensions": [
+      "./index.js"
+    ],
     "channel": {
       "id": "silverpine-chat",
       "label": "Silverpine Chat",
@@ -23,5 +30,8 @@
       "blurb": "Connect an OpenClaw agent to Silverpine Chat channels.",
       "markdownCapable": true
     }
+  },
+  "devDependencies": {
+    "ws": "^8.21.3"
   }
 }
