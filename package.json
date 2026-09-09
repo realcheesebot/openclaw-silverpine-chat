@@ -2,13 +2,23 @@
   "name": "@silverpine/openclaw-silverpine-chat",
   "version": "0.1.0",
   "description": "Silverpine Chat channel plugin for OpenClaw",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realcheesebot/openclaw-silverpine-chat.git"
+  },
+  "homepage": "https://github.com/realcheesebot/openclaw-silverpine-chat#readme",
+  "bugs": {
+    "url": "https://github.com/realcheesebot/openclaw-silverpine-chat/issues"
+  },
   "type": "module",
   "main": "./index.js",
   "files": [
     "index.js",
     "src",
     "openclaw.plugin.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node --test",
